@@ -1,0 +1,81 @@
+{
+  "title": "ETL Pipeline Overview",
+  "uid": "etl-pipeline-overview",
+  "schemaVersion": 38,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "ClickHouse — fact_sales rows",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": "ClickHouse",
+      "targets": [{
+        "rawSql": "SELECT count() FROM etl_warehouse.fact_sales",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 2, "type": "stat", "title": "ClickHouse — sensor readings",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": "ClickHouse",
+      "targets": [{
+        "rawSql": "SELECT count() FROM etl_warehouse.fact_sensor_readings",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 3, "type": "stat", "title": "LLM Queries (last 24h)",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": "ClickHouse",
+      "targets": [{
+        "rawSql": "SELECT count() FROM etl_warehouse.llm_insights WHERE created_at >= now() - INTERVAL 24 HOUR",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Anomalies detected (last hour)",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": "ClickHouse",
+      "targets": [{
+        "rawSql": "SELECT count() FROM etl_warehouse.agg_hourly_sensor WHERE anomaly_flag = 1 AND hour_ts >= now() - INTERVAL 1 HOUR",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Revenue over time",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": "ClickHouse",
+      "targets": [{
+        "rawSql": "SELECT full_date AS time, sum(total_revenue) AS revenue FROM etl_warehouse.agg_daily_revenue GROUP BY 1 ORDER BY 1",
+        "format": "time_series"
+      }]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Sensor avg temperature by location",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": "ClickHouse",
+      "targets": [{
+        "rawSql": "SELECT hour_ts AS time, location_id, avg_temp FROM etl_warehouse.agg_hourly_sensor WHERE hour_ts >= now() - INTERVAL 6 HOUR ORDER BY 1",
+        "format": "time_series"
+      }]
+    },
+    {
+      "id": 7, "type": "barchart", "title": "Trading volume by asset (7 days)",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": "ClickHouse",
+      "targets": [{
+        "rawSql": "SELECT asset, sum(total_volume) AS volume FROM etl_warehouse.agg_trading_volume WHERE full_date >= today() - 7 GROUP BY asset ORDER BY volume DESC LIMIT 10",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 8, "type": "piechart", "title": "Revenue by region",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": "ClickHouse",
+      "targets": [{
+        "rawSql": "SELECT region, sum(total_revenue) AS revenue FROM etl_warehouse.agg_daily_revenue WHERE full_date >= today() - 7 GROUP BY region",
+        "format": "table"
+      }]
+    }
+  ]
+}

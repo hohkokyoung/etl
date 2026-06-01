@@ -1,0 +1,17 @@
+etl_clickhouse:
+  target: dev
+  outputs:
+    dev:
+      type: clickhouse
+      schema: etl_warehouse
+      host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
+      port: 8123
+      user: "{{ env_var('CLICKHOUSE_USER', 'etl_user') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD', 'etl_pass_2024') }}"
+      secure: false
+      verify: false
+      connect_timeout: 10
+      send_receive_timeout: 300
+      sync_request_timeout: 5
+      compress_block_size: 1048576
+      compression: lz4

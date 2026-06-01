@@ -1,0 +1,492 @@
+version: "3.9"
+
+x-common-env: &common-env
+  env_file: .env
+
+x-restart: &restart
+  restart: unless-stopped
+
+x-healthcheck-defaults: &hc-defaults
+  interval: 15s
+  timeout: 10s
+  retries: 5
+  start_period: 30s
+
+services:
+
+  # ── Mock AWS ──────────────────────────────────────────────────────
+  floci:
+    image: floci/floci:latest
+    container_name: etl-floci
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,sqs,sns,glue,athena,iam,kinesis,cloudwatch
+      - DEBUG=0
+    volumes:
+      - floci-data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_floci/health"]
+      <<: *hc-defaults
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+
+  # ── Kafka (KRaft — no Zookeeper) ──────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    container_name: etl-kafka
+    ports:
+      - "9092:9092"     # host access (localhost:9092)
+      - "9101:9101"     # JMX
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      # INTERNAL = Docker-network traffic (schema-registry, consumers, etc.)
+      # EXTERNAL = host machine access (localhost:9092)
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_JMX_PORT: 9101
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list 2>/dev/null || exit 1"]
+      <<: *hc-defaults
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.7.0
+    container_name: etl-schema-registry
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      <<: *hc-defaults
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: etl-kafka-ui
+    ports:
+      - "8082:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+    depends_on:
+      kafka:
+        condition: service_healthy
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+
+  # ── Spark ─────────────────────────────────────────────────────────
+  spark-master:
+    image: apache/spark:3.5.3
+    container_name: etl-spark-master
+    user: root
+    ports:
+      - "7077:7077"
+      - "8083:8080"
+    environment:
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: 7077
+      SPARK_MASTER_WEBUI_PORT: 8080
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    volumes:
+      - ./processing/spark_jobs:/opt/spark-jobs
+      - spark-logs:/opt/spark/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      <<: *hc-defaults
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4g
+
+  spark-worker-1:
+    image: apache/spark:3.5.3
+    container_name: etl-spark-worker-1
+    user: root
+    environment:
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_WORKER_CORES: "2"
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    volumes:
+      - spark-logs:/opt/spark/logs
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 3g
+
+  spark-worker-2:
+    image: apache/spark:3.5.3
+    container_name: etl-spark-worker-2
+    user: root
+    environment:
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_WORKER_CORES: "2"
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    volumes:
+      - spark-logs:/opt/spark/logs
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 3g
+
+  # ── ClickHouse ────────────────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: etl-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-etl_user}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-etl_pass_2024}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-etl_warehouse}
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./olap/clickhouse_init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      <<: *hc-defaults
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4g
+
+  # ── PostgreSQL ────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: etl-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-airflow}
+      POSTGRES_USER: ${POSTGRES_USER:-airflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow_pass_2024}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-airflow}"]
+      <<: *hc-defaults
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+
+  # ── Valkey (Redis-compatible cache + Celery broker) ───────────────
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: etl-valkey
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey-data:/data
+    command: valkey-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      <<: *hc-defaults
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+
+  # ── Ollama (Local LLM) ────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: etl-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      OLLAMA_NUM_PARALLEL: 2
+      OLLAMA_MAX_LOADED_MODELS: 1
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      <<: *hc-defaults
+      start_period: 60s
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4g
+
+  # ── Airflow ───────────────────────────────────────────────────────
+  airflow-init:
+    image: apache/airflow:2.9.3
+    container_name: etl-airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow_pass_2024}@postgres:5432/${POSTGRES_DB:-airflow}
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    command:
+      - bash
+      - -c
+      - >-
+        airflow db migrate &&
+        (airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@etl.local || true)
+    restart: on-failure
+
+  airflow-webserver:
+    image: apache/airflow:2.9.3
+    container_name: etl-airflow-webserver
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow_pass_2024}@postgres:5432/${POSTGRES_DB:-airflow}
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+    volumes:
+      - ./infra/airflow/dags:/opt/airflow/dags
+      - ./infra/airflow/plugins:/opt/airflow/plugins
+      - airflow-logs:/opt/airflow/logs
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      <<: *hc-defaults
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2g
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.3
+    container_name: etl-airflow-scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow_pass_2024}@postgres:5432/${POSTGRES_DB:-airflow}
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    volumes:
+      - ./infra/airflow/dags:/opt/airflow/dags
+      - ./infra/airflow/plugins:/opt/airflow/plugins
+      - airflow-logs:/opt/airflow/logs
+    command: scheduler
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+
+  # ── Prometheus ────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    container_name: etl-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+
+  # ── Grafana ───────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: etl-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: grafana_pass_2024
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+
+  # ── Python Kafka Consumer (bronze) ────────────────────────────────
+  python-consumer:
+    build:
+      context: ./ingestion/consumers/python_raw
+      dockerfile: Dockerfile
+    container_name: etl-python-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      floci:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      AWS_ENDPOINT_URL: http://floci:4566
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+
+  # ── Celery Worker (async LLM jobs) ────────────────────────────────
+  celery-worker:
+    build:
+      context: ./llm
+      dockerfile: Dockerfile
+    container_name: etl-celery-worker
+    depends_on:
+      valkey:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      VALKEY_URL: redis://valkey:6379/0
+      OLLAMA_BASE_URL: http://ollama:11434
+      CLICKHOUSE_HOST: clickhouse
+    command: celery -A celery_tasks worker --loglevel=info --concurrency=2
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+
+  # ── Dashboard API ─────────────────────────────────────────────────
+  dashboard-api:
+    build:
+      context: ./dashboard/api
+      dockerfile: Dockerfile
+    container_name: etl-dashboard-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      valkey:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      VALKEY_URL: redis://valkey:6379/1
+      CLICKHOUSE_HOST: clickhouse
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      AWS_ENDPOINT_URL: http://floci:4566
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+
+  # ── Dashboard UI ──────────────────────────────────────────────────
+  dashboard-ui:
+    build:
+      context: ./dashboard/frontend
+      dockerfile: Dockerfile
+    container_name: etl-dashboard-ui
+    ports:
+      - "3030:80"
+    depends_on:
+      - dashboard-api
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256m
+
+volumes:
+  floci-data:
+  kafka-data:
+  clickhouse-data:
+  postgres-data:
+  valkey-data:
+  ollama-models:
+  spark-logs:
+  airflow-logs:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  default:
+    name: etl-network
+    driver: bridge

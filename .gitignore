@@ -1,0 +1,35 @@
+# Environment variables (contains passwords)
+.env
+
+# Terraform state (contains sensitive resource info)
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/**/*.tfstate
+terraform/**/*.tfstate.backup
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+build/
+
+# dbt
+processing/dbt/target/
+processing/dbt/dbt_packages/
+processing/dbt/logs/
+
+# Airflow
+infra/airflow/logs/
+
+# Docker
+*.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db

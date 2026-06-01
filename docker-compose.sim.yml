@@ -1,0 +1,28 @@
+version: "3.9"
+
+# Standalone simulator stack — run with: make sim-start
+# Requires core stack (make up) to be running first.
+
+services:
+  simulator:
+    build:
+      context: ./simulation
+      dockerfile: Dockerfile
+    container_name: etl-simulator
+    networks:
+      - etl-network
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      VALKEY_URL: redis://valkey:6379/0
+      SIM_EVENTS_PER_SECOND: ${SIM_EVENTS_PER_SECOND:-50}
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+
+networks:
+  etl-network:
+    external: true

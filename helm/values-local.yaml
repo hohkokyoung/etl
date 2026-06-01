@@ -1,0 +1,45 @@
+# k3d single-machine overrides — reduces resource limits for local study
+kafka:
+  replicaCount: 1
+  persistence:
+    size: 512Mi
+
+clickhouse:
+  persistence:
+    size: 2Gi
+  resources:
+    limits: { cpu: "1", memory: 2Gi }
+
+spark:
+  master:
+    resources:
+      limits: { cpu: "1", memory: 2Gi }
+  worker:
+    replicaCount: 1
+    resources:
+      limits: { cpu: "1", memory: 2Gi }
+
+postgres:
+  primary:
+    persistence:
+      size: 512Mi
+
+prometheus:
+  server:
+    persistentVolume:
+      size: 512Mi
+
+ollama:
+  resources:
+    limits: { cpu: "2", memory: 3Gi }
+
+dashboardApi:
+  autoscaling:
+    enabled: false
+  replicas: 1
+
+celeryWorker:
+  replicas: 1
+
+simulators:
+  eventsPerSecond: 20

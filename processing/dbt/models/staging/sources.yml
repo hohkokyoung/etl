@@ -1,0 +1,39 @@
+version: 2
+
+sources:
+  - name: etl_warehouse
+    database: etl_warehouse
+    schema: etl_warehouse
+    description: "ClickHouse ETL data warehouse — loaded from S3 gold by Airflow"
+    tables:
+      - name: fact_sales
+        description: "Sales transactions loaded from S3 gold"
+        columns:
+          - name: sale_id
+            description: "Unique sale identifier"
+            tests: [unique, not_null]
+          - name: total_amount
+            tests: [not_null]
+      - name: fact_sensor_readings
+        description: "IoT sensor readings"
+        columns:
+          - name: reading_id
+            tests: [unique, not_null]
+      - name: fact_trades
+        description: "Financial trade executions"
+        columns:
+          - name: trade_id
+            tests: [unique, not_null]
+      - name: fact_social_engagement
+        description: "Social media post engagements"
+        columns:
+          - name: post_id
+            tests: [unique, not_null]
+      - name: dim_customer
+        description: "Customer dimension"
+      - name: dim_product
+        description: "Product dimension"
+      - name: dim_sensor_location
+        description: "IoT sensor location dimension"
+      - name: dim_date
+        description: "Date dimension spine"

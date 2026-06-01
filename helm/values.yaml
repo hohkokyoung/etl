@@ -1,0 +1,142 @@
+# ── Global ────────────────────────────────────────────────────────
+global:
+  storageClass: "local-path"
+  imageRegistry: ""
+
+# ── Kafka (KRaft, no Zookeeper) ───────────────────────────────────
+kafka:
+  replicaCount: 1
+  kraft:
+    enabled: true
+  zookeeper:
+    enabled: false
+  persistence:
+    size: 2Gi
+  resources:
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# ── ClickHouse ────────────────────────────────────────────────────
+clickhouse:
+  replicaCount: 1
+  auth:
+    username: etl_user
+    password: etl_pass_2024
+    database: etl_warehouse
+  persistence:
+    size: 5Gi
+  resources:
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+# ── Spark ─────────────────────────────────────────────────────────
+spark:
+  master:
+    resources:
+      limits: { cpu: "2", memory: 4Gi }
+  worker:
+    replicaCount: 2
+    resources:
+      limits: { cpu: "2", memory: 3Gi }
+
+# ── PostgreSQL ────────────────────────────────────────────────────
+postgres:
+  auth:
+    username: airflow
+    password: airflow_pass_2024
+    database: airflow
+  primary:
+    persistence:
+      size: 2Gi
+    resources:
+      limits: { cpu: "0.5", memory: 512Mi }
+
+# ── Valkey ────────────────────────────────────────────────────────
+valkey:
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      size: 1Gi
+    resources:
+      limits: { cpu: "0.5", memory: 512Mi }
+
+# ── Grafana ───────────────────────────────────────────────────────
+grafana:
+  adminPassword: grafana_pass_2024
+  persistence:
+    enabled: true
+    size: 1Gi
+  resources:
+    limits: { cpu: "0.5", memory: 512Mi }
+
+# ── Prometheus ────────────────────────────────────────────────────
+prometheus:
+  server:
+    persistentVolume:
+      size: 2Gi
+    resources:
+      limits: { cpu: "0.5", memory: 512Mi }
+  alertmanager:
+    enabled: false
+
+# ── Airflow ───────────────────────────────────────────────────────
+airflow:
+  executor: LocalExecutor
+  webserver:
+    defaultUser:
+      enabled: true
+      username: admin
+      password: admin
+  postgresql:
+    enabled: false
+  externalDatabase:
+    type: postgres
+    host: "{{ .Release.Name }}-postgres"
+    port: 5432
+    database: airflow
+    user: airflow
+    password: airflow_pass_2024
+
+# ── Custom services (deployed as raw manifests via extraDeploy) ───
+floci:
+  image: floci-io/floci:latest
+  port: 4566
+
+ollama:
+  image: ollama/ollama:latest
+  port: 11434
+  model: llama3.2:3b
+  resources:
+    limits: { cpu: "4", memory: 4Gi }
+
+dashboardApi:
+  image: etl-dashboard-api:latest
+  port: 8000
+  replicas: 1
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+
+dashboardUi:
+  image: etl-dashboard-ui:latest
+  port: 80
+  replicas: 1
+
+pythonConsumer:
+  image: etl-python-consumer:latest
+  replicas: 1
+
+celeryWorker:
+  image: etl-celery-worker:latest
+  replicas: 2
+
+simulators:
+  image: etl-simulators:latest
+  replicas: 1
+  eventsPerSecond: 50
