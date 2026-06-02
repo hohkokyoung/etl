@@ -13,9 +13,9 @@ SENTIMENTS = ["positive", "neutral", "negative"]
 
 def generate_post() -> dict:
     platform = random.choice(PLATFORMS)
-    likes = int(random.exponential(50))
-    shares = int(random.exponential(10))
-    comments = int(random.exponential(20))
+    likes = int(random.expovariate(1/50))
+    shares = int(random.expovariate(1/10))
+    comments = int(random.expovariate(1/20))
     return {
         "post_id": str(uuid.uuid4()),
         "user_id": str(uuid.uuid4())[:8],
@@ -30,7 +30,7 @@ def generate_post() -> dict:
         "sentiment": random.choice(SENTIMENTS),
         "is_sponsored": random.random() < 0.05,
         "hashtag_count": random.randint(0, 15),
-        "follower_count": int(random.exponential(500)),
+        "follower_count": int(random.expovariate(1/500)),
         "event_ts": datetime.now(timezone.utc).isoformat(),
         "event_type": "social_post",
         "source": "social",

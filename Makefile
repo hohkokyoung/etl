@@ -4,7 +4,7 @@
 up:
 	docker compose up -d --build
 	@echo "Waiting for services to be healthy..."
-	@sleep 10
+	@ping -n 11 127.0.0.1 > nul
 	$(MAKE) init-floci
 	$(MAKE) pull-model
 	@echo ""

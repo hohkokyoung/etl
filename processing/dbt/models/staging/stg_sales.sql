@@ -16,7 +16,6 @@ cleaned as (
         toDecimal64(unit_price, 2)                  as unit_price,
         toDecimal64(total_amount, 2)                as total_amount,
         lower(trim(status))                         as status,
-        lower(trim(coalesce(payment_method, 'unknown'))) as payment_method,
         event_ts,
         _batch_id,
         _loaded_at

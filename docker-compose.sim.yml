@@ -13,7 +13,7 @@ services:
       - etl-network
     env_file: .env
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       VALKEY_URL: redis://valkey:6379/0
       SIM_EVENTS_PER_SECOND: ${SIM_EVENTS_PER_SECOND:-50}
     restart: unless-stopped

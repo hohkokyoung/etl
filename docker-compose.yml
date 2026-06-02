@@ -116,16 +116,21 @@ services:
 
   # ── Spark ─────────────────────────────────────────────────────────
   spark-master:
-    image: apache/spark:3.5.3
+    build:
+      context: ./processing
+      dockerfile: spark.Dockerfile
+    image: etl-spark:latest
     container_name: etl-spark-master
     user: root
     ports:
       - "7077:7077"
       - "8083:8080"
+      - "6066:6066"
     environment:
       SPARK_MASTER_HOST: spark-master
       SPARK_MASTER_PORT: 7077
       SPARK_MASTER_WEBUI_PORT: 8080
+      SPARK_MASTER_OPTS: "-Dspark.master.rest.enabled=true -Dspark.master.rest.port=6066"
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
     volumes:
       - ./processing/spark_jobs:/opt/spark-jobs
@@ -141,7 +146,7 @@ services:
           memory: 4g
 
   spark-worker-1:
-    image: apache/spark:3.5.3
+    image: etl-spark:latest
     container_name: etl-spark-worker-1
     user: root
     environment:
@@ -152,6 +157,7 @@ services:
       spark-master:
         condition: service_healthy
     volumes:
+      - ./processing/spark_jobs:/opt/spark-jobs
       - spark-logs:/opt/spark/logs
     <<: *restart
     deploy:
@@ -161,7 +167,7 @@ services:
           memory: 3g
 
   spark-worker-2:
-    image: apache/spark:3.5.3
+    image: etl-spark:latest
     container_name: etl-spark-worker-2
     user: root
     environment:
@@ -172,6 +178,7 @@ services:
       spark-master:
         condition: service_healthy
     volumes:
+      - ./processing/spark_jobs:/opt/spark-jobs
       - spark-logs:/opt/spark/logs
     <<: *restart
     deploy:
@@ -288,8 +295,12 @@ services:
     restart: on-failure
 
   airflow-webserver:
-    image: apache/airflow:2.9.3
+    build:
+      context: ./infra/airflow
+      dockerfile: Dockerfile
+    image: etl-airflow:latest
     container_name: etl-airflow-webserver
+    user: root
     ports:
       - "8080:8080"
     depends_on:
@@ -303,7 +314,10 @@ services:
     volumes:
       - ./infra/airflow/dags:/opt/airflow/dags
       - ./infra/airflow/plugins:/opt/airflow/plugins
+      - ./processing/spark_jobs:/opt/airflow/spark_jobs
+      - ./processing/dbt:/opt/airflow/dbt
       - airflow-logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
     command: webserver
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -316,8 +330,9 @@ services:
           memory: 2g
 
   airflow-scheduler:
-    image: apache/airflow:2.9.3
+    image: etl-airflow:latest
     container_name: etl-airflow-scheduler
+    user: root
     depends_on:
       airflow-init:
         condition: service_completed_successfully
@@ -328,7 +343,10 @@ services:
     volumes:
       - ./infra/airflow/dags:/opt/airflow/dags
       - ./infra/airflow/plugins:/opt/airflow/plugins
+      - ./processing/spark_jobs:/opt/airflow/spark_jobs
+      - ./processing/dbt:/opt/airflow/dbt
       - airflow-logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
     command: scheduler
     <<: *restart
     deploy:
@@ -380,6 +398,42 @@ services:
         limits:
           cpus: "0.5"
           memory: 512m
+
+  # ── Spark Streaming Consumer (Kafka → S3 silver Iceberg) ─────────
+  spark-streaming:
+    image: etl-spark:latest
+    container_name: etl-spark-streaming
+    user: root
+    depends_on:
+      kafka:
+        condition: service_healthy
+      floci:
+        condition: service_healthy
+      spark-master:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      AWS_ENDPOINT_URL: http://floci:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      S3_BUCKET_SILVER: processed-silver
+      SPARK_MASTER: local[2]
+    volumes:
+      - ./ingestion/consumers/spark_streaming:/opt/streaming
+    command:
+      - /opt/spark/bin/spark-submit
+      - --master
+      - local[2]
+      - --jars
+      - /opt/spark-jars/iceberg-spark-runtime-3.5_2.12-1.6.0.jar,/opt/spark-jars/hadoop-aws-3.3.4.jar,/opt/spark-jars/aws-java-sdk-bundle-1.12.262.jar,/opt/spark-jars/spark-sql-kafka-0-10_2.12-3.5.3.jar,/opt/spark-jars/kafka-clients-3.4.1.jar,/opt/spark-jars/spark-token-provider-kafka-0-10_2.12-3.5.3.jar,/opt/spark-jars/commons-pool2-2.11.1.jar
+      - /opt/streaming/streaming_job.py
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 3g
 
   # ── Python Kafka Consumer (bronze) ────────────────────────────────
   python-consumer:
@@ -446,7 +500,7 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
-      VALKEY_URL: redis://valkey:6379/1
+      VALKEY_URL: redis://valkey:6379/0
       CLICKHOUSE_HOST: clickhouse
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       AWS_ENDPOINT_URL: http://floci:4566

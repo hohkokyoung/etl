@@ -34,7 +34,7 @@ def generate_trade() -> dict:
         "price": price,
         "total_value": round(qty * price, 4),
         "exchange": random.choice(EXCHANGES),
-        "slippage_bps": round(random.exponential(2), 2),
+        "slippage_bps": round(random.expovariate(1/2), 2),
         "event_ts": datetime.now(timezone.utc).isoformat(),
         "event_type": "trade_executed",
         "source": "financial",

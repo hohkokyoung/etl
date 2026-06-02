@@ -8,14 +8,14 @@ import LakeExplorer from './components/LakeExplorer/LakeExplorer'
 type Tab = 'overview' | 'simulation' | 'lake' | 'ai-query'
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  { id: 'ai-query',   label: 'AI Query',    icon: <BrainCircuit size={16} /> },
   { id: 'overview',   label: 'Pipeline',    icon: <Activity size={16} /> },
   { id: 'simulation', label: 'Simulation',  icon: <FlaskConical size={16} /> },
   { id: 'lake',       label: 'Data Lake',   icon: <Database size={16} /> },
-  { id: 'ai-query',   label: 'AI Query',    icon: <BrainCircuit size={16} /> },
 ]
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('overview')
+  const [activeTab, setActiveTab] = useState<Tab>('ai-query')
 
   return (
     <div className="min-h-screen flex flex-col">

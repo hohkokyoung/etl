@@ -14,11 +14,14 @@ INSIGHT_QUERIES = [
 
 
 def run_insights(**context):
-    import os, sys
-    sys.path.insert(0, "/opt/airflow")
-    from llm.celery_tasks import analyze_query
+    import os
+    from celery import Celery
+
+    valkey_url = os.environ.get("VALKEY_URL", "redis://valkey:6379/0")
+    app = Celery("airflow_llm_client", broker=valkey_url, backend=valkey_url)
+
     for qt, query in INSIGHT_QUERIES:
-        task = analyze_query.delay(query, qt)
+        task = app.send_task("llm.analyze_query", args=[query, qt])
         print(f"Submitted {qt} task {task.id}: {query[:60]}")
 
 
@@ -34,9 +37,4 @@ with DAG(
     PythonOperator(
         task_id="submit_llm_insights",
         python_callable=run_insights,
-        env_vars={
-            "OLLAMA_BASE_URL": "http://ollama:11434",
-            "VALKEY_URL": "redis://valkey:6379/0",
-            "CLICKHOUSE_HOST": "clickhouse",
-        },
     )

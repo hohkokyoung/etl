@@ -1,12 +1,4 @@
-{{
-    config(
-        materialized='incremental',
-        engine='SummingMergeTree()',
-        order_by='(full_date, asset)',
-        partition_by='toYYYYMM(full_date)',
-        incremental_strategy='append',
-    )
-}}
+{{ config(materialized='table') }}
 
 with trades as (
     select * from {{ ref('stg_trades') }}
@@ -25,7 +17,3 @@ select
     now()                  as _computed_at
 from trades
 group by 1, 2, 3
-
-{% if is_incremental() %}
-having full_date >= (select max(full_date) from {{ this }}) - 1
-{% endif %}

@@ -1,12 +1,4 @@
-{{
-    config(
-        materialized='incremental',
-        engine='SummingMergeTree()',
-        order_by='(hour_ts, location_id)',
-        partition_by='toYYYYMMDD(hour_ts)',
-        incremental_strategy='append',
-    )
-}}
+{{ config(materialized='table') }}
 
 select
     location_id,
@@ -18,7 +10,3 @@ select
     temp_anomaly     as anomaly_flag,
     now()            as _computed_at
 from {{ ref('int_sensor_anomalies') }}
-
-{% if is_incremental() %}
-where hour_ts >= (select max(hour_ts) from {{ this }}) - interval 2 hour
-{% endif %}

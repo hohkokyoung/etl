@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
-import ReactFlow, { Background, Controls, MiniMap, Node, Edge } from 'reactflow'
+import ReactFlow, { Background, Controls, Node, Edge } from 'reactflow'
 import 'reactflow/dist/style.css'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -9,12 +9,35 @@ const STATUS_COLORS: Record<string, string> = {
   unreachable: 'bg-red-500',
 }
 
+const SERVICE_URLS: Record<string, string> = {
+  Floci:      'http://localhost:4566/_floci/health',
+  'Kafka UI': 'http://localhost:8082',
+  Spark:      'http://localhost:8083',
+  Airflow:    'http://localhost:8080',
+  Ollama:     'http://localhost:11434',
+  ClickHouse: 'http://localhost:8123/play',
+}
+
 function ServiceBadge({ name, status, port }: { name: string; status: string; port: number }) {
-  return (
-    <div className="flex items-center gap-2 bg-gray-800 rounded px-3 py-2 text-xs">
+  const url = SERVICE_URLS[name]
+  const inner = (
+    <>
       <span className={`w-2 h-2 rounded-full ${STATUS_COLORS[status] ?? 'bg-gray-500'}`} />
       <span className="text-gray-200">{name}</span>
       <span className="text-gray-500">:{port}</span>
+    </>
+  )
+  if (url) {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer"
+         className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 rounded px-3 py-2 text-xs transition-colors cursor-pointer">
+        {inner}
+      </a>
+    )
+  }
+  return (
+    <div className="flex items-center gap-2 bg-gray-800 rounded px-3 py-2 text-xs">
+      {inner}
     </div>
   )
 }
@@ -89,7 +112,6 @@ export default function Overview() {
           <ReactFlow nodes={rfNodes} edges={rfEdges} fitView>
             <Background color="#374151" gap={20} />
             <Controls />
-            <MiniMap nodeColor={() => '#4b5563'} maskColor="rgba(0,0,0,0.6)" />
           </ReactFlow>
         </div>
       </div>

@@ -36,7 +36,7 @@ def generate_reading() -> dict:
 
     pressure = round(random.gauss(1013.25, 5), 2)
     humidity = round(min(100, max(0, random.gauss(60, 10))), 2)
-    vibration = round(random.exponential(0.1) if is_anomaly else random.exponential(0.02), 4)
+    vibration = round(random.expovariate(1/0.1) if is_anomaly else random.expovariate(1/0.02), 4)
 
     return {
         "reading_id": str(uuid.uuid4()),

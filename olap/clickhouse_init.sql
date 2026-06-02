@@ -186,3 +186,31 @@ CREATE TABLE IF NOT EXISTS etl_warehouse.llm_insights (
 ) ENGINE = MergeTree()
 ORDER BY created_at
 TTL created_at + INTERVAL 30 DAY;
+
+-- ── Seed: dim_sensor_location (hardcoded IoT locations) ──────────
+INSERT INTO etl_warehouse.dim_sensor_location
+    (location_id, site_name, latitude, longitude, sensor_type)
+VALUES
+    ('LOC-001', 'Warehouse A', 3.1390,  101.6869, 'multi'),
+    ('LOC-002', 'Factory B',   1.3521,  103.8198, 'multi'),
+    ('LOC-003', 'Office C',   13.7563,  100.5018, 'multi'),
+    ('LOC-004', 'Depot D',    22.3193,  114.1694, 'multi'),
+    ('LOC-005', 'Plant E',    37.5665,  126.9780, 'multi');
+
+-- ── Seed: dim_date (2024-01-01 → 2027-12-31) ─────────────────────
+INSERT INTO etl_warehouse.dim_date
+    (date_key, full_date, year, quarter, month, week, day_of_week, is_weekend)
+SELECT
+    toUInt32(toYYYYMMDD(d))                        AS date_key,
+    d                                              AS full_date,
+    toYear(d)                                      AS year,
+    toQuarter(d)                                   AS quarter,
+    toMonth(d)                                     AS month,
+    toISOWeek(d)                                   AS week,
+    toDayOfWeek(d)                                 AS day_of_week,
+    toUInt8(toDayOfWeek(d) IN (6, 7))              AS is_weekend
+FROM (
+    SELECT toDate('2024-01-01') + number AS d
+    FROM numbers(1461)   -- 4 years (2024–2027), 2024 is a leap year
+)
+WHERE d <= toDate('2027-12-31');

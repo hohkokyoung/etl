@@ -23,8 +23,10 @@ S3_ENDPOINT = os.environ.get("AWS_ENDPOINT_URL", "http://localhost:4566")
 
 
 def build_spark() -> SparkSession:
+    master = os.environ.get("SPARK_MASTER", "local[*]")
     return (
         SparkSession.builder
+        .master(master)
         .appName("etl-silver-to-gold")
         .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
         .config("spark.sql.catalog.silver", "org.apache.iceberg.spark.SparkCatalog")
@@ -103,10 +105,45 @@ def build_fact_social(spark: SparkSession, date: str) -> DataFrame:
     )
 
 
-def write_gold(df: DataFrame, table_name: str, spark: SparkSession):
+def build_dim_customer(spark: SparkSession) -> DataFrame:
+    """Full-history dedup of silver_customers — latest record wins per customer_id."""
+    customers = spark.read.format("iceberg").load("silver.default.silver_customers")
+    w = Window.partitionBy("customer_id").orderBy(F.col("event_ts").desc())
+    return (
+        customers
+        .withColumn("_rn", F.row_number().over(w))
+        .filter(F.col("_rn") == 1)
+        .select("customer_id", "email", "name", "region", "age_group",
+                F.col("event_ts").alias("created_at"),
+                F.current_timestamp().alias("_loaded_at"))
+    )
+
+
+def build_dim_product(spark: SparkSession) -> DataFrame:
+    """Full-history dedup of silver_products — latest record wins per product_id."""
+    products = spark.read.format("iceberg").load("silver.default.silver_products")
+    w = Window.partitionBy("product_id").orderBy(F.col("event_ts").desc())
+    return (
+        products
+        .withColumn("_rn", F.row_number().over(w))
+        .filter(F.col("_rn") == 1)
+        .select("product_id", "name", "category", "price", "stock_quantity",
+                F.col("event_ts").alias("created_at"),
+                F.current_timestamp().alias("_loaded_at"))
+    )
+
+
+def write_gold(df: DataFrame, table_name: str, spark: SparkSession, partition_col: str = "date_key"):
     full_table = f"gold.default.{table_name}"
-    df.writeTo(full_table).using("iceberg").partitionedBy("date_key").createOrReplace()
+    df.writeTo(full_table).using("iceberg").partitionedBy(partition_col).createOrReplace()
     logger.info("Written %s → gold", table_name)
+
+
+def write_gold_dim(df: DataFrame, table_name: str):
+    """Dims are not date-partitioned — full replace each run."""
+    full_table = f"gold.default.{table_name}"
+    df.writeTo(full_table).using("iceberg").createOrReplace()
+    logger.info("Written dim %s → gold", table_name)
 
 
 def process(date: str):
@@ -118,12 +155,20 @@ def process(date: str):
     write_gold(build_fact_trades(spark, date), "fact_trades", spark)
     write_gold(build_fact_social(spark, date), "fact_social_engagement", spark)
 
+    write_gold_dim(build_dim_customer(spark), "dim_customer")
+    write_gold_dim(build_dim_product(spark), "dim_product")
+
     logger.info("silver→gold complete for date=%s", date)
     spark.stop()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--date", default=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-    args = parser.parse_args()
+    if os.environ.get("ETL_DATE"):
+        class Args:
+            date = os.environ["ETL_DATE"]
+        args = Args()
+    else:
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--date", default=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        args = parser.parse_args()
     process(args.date)

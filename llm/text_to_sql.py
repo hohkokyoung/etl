@@ -30,10 +30,14 @@ dim_date(date_key UInt32, full_date Date, year UInt16, quarter UInt8, month UInt
 
 agg_daily_revenue(date_key UInt32, full_date Date, region String, category String,
                   total_orders UInt32, total_revenue Decimal(18,2), avg_order_value Decimal(10,2))
+  -- full_date is a Date column; use it for date range filters (e.g. WHERE full_date >= today() - 7)
+  -- date_key is an integer surrogate key (YYYYMMDD) — do NOT use date functions on it directly
+
 agg_hourly_sensor(hour_ts DateTime, location_id String, avg_temp Float32,
                   avg_pressure Float32, avg_humidity Float32, reading_count UInt32, anomaly_flag UInt8)
 agg_trading_volume(date_key UInt32, full_date Date, asset String, total_volume Float64,
                    trade_count UInt32, avg_price Decimal(18,8))
+  -- full_date is a Date column; use it for date range filters
 
 llm_insights(insight_id String, query_type String, user_query String,
              generated_sql Nullable(String), response String, model_used String,
@@ -41,9 +45,21 @@ llm_insights(insight_id String, query_type String, user_query String,
 
 Rules:
 - Always prefix table names with `etl_warehouse.`
-- Use toDate(), toStartOfHour(), toYYYYMM() for date functions
+- For date ranges use: WHERE full_date >= today() - N  or  WHERE event_ts >= now() - INTERVAL N DAY
+- Never apply toYYYYMM() or toStartOfHour() to date_key (it is an integer, not a date)
+- Prefer agg_* tables over fact_* tables for aggregation questions
 - Prefer LIMIT to avoid large scans
 - Return ONLY the SQL query, no explanation, no markdown fences
+
+Examples:
+Question: Show total revenue by region for the last 7 days
+SQL: SELECT region, SUM(total_revenue) AS total_revenue FROM etl_warehouse.agg_daily_revenue WHERE full_date >= today() - 7 GROUP BY region ORDER BY total_revenue DESC LIMIT 50;
+
+Question: Top 5 products by total sales amount
+SQL: SELECT product_id, SUM(total_amount) AS total_sales FROM etl_warehouse.fact_sales GROUP BY product_id ORDER BY total_sales DESC LIMIT 5;
+
+Question: What is the trading volume by asset this week?
+SQL: SELECT asset, SUM(total_volume) AS volume, AVG(avg_price) AS avg_price FROM etl_warehouse.agg_trading_volume WHERE full_date >= today() - 7 GROUP BY asset ORDER BY volume DESC LIMIT 50;
 """.strip()
 
 

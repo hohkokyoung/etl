@@ -16,7 +16,7 @@ with DAG(
 
     dbt_run = BashOperator(
         task_id="dbt_run",
-        bash_command="cd /opt/dbt && dbt run --profiles-dir /opt/dbt --target dev",
+        bash_command="cd /opt/airflow/dbt && /home/airflow/.local/bin/dbt run --profiles-dir /opt/airflow/dbt --target dev",
         env={
             "CLICKHOUSE_HOST": "clickhouse",
             "CLICKHOUSE_USER": "etl_user",
@@ -26,7 +26,7 @@ with DAG(
 
     dbt_test = BashOperator(
         task_id="dbt_test",
-        bash_command="cd /opt/dbt && dbt test --profiles-dir /opt/dbt --target dev",
+        bash_command="cd /opt/airflow/dbt && /home/airflow/.local/bin/dbt test --profiles-dir /opt/airflow/dbt --target dev",
         env={
             "CLICKHOUSE_HOST": "clickhouse",
             "CLICKHOUSE_USER": "etl_user",

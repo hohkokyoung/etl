@@ -89,8 +89,12 @@ DEDUP_KEYS: dict[str, str] = {
 
 
 def build_spark() -> SparkSession:
+    # Use local mode when running inside Airflow (no external Spark cluster needed)
+    # Use spark://spark-master:7077 when submitting via spark-submit to the cluster
+    master = os.environ.get("SPARK_MASTER", "local[*]")
     return (
         SparkSession.builder
+        .master(master)
         .appName("etl-bronze-to-silver")
         .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
         .config("spark.sql.catalog.lake", "org.apache.iceberg.spark.SparkCatalog")
@@ -146,17 +150,17 @@ def add_metadata(df: DataFrame, batch_id: str) -> DataFrame:
 
 def write_silver(df: DataFrame, source: str, spark: SparkSession):
     table = f"lake.default.silver_{source}"
-    # Create table if not exists
-    spark.sql(f"""
-        CREATE TABLE IF NOT EXISTS {table}
-        USING iceberg
-        PARTITIONED BY (_year, _month, _day)
-        LOCATION 's3a://{S3_SILVER}/{source}'
-        AS SELECT * FROM (SELECT * FROM {table} LIMIT 0) t
-    """) if False else None  # skip — use append mode which auto-creates
-
-    df.writeTo(table).using("iceberg").partitionedBy("_year", "_month", "_day").append()
-    logger.info("Written %d rows to %s", df.count(), table)
+    try:
+        # Append if table already exists
+        df.writeTo(table).using("iceberg").partitionedBy("_year", "_month", "_day").append()
+    except Exception as e:
+        if "TABLE_OR_VIEW_NOT_FOUND" in str(e) or "table" in str(e).lower():
+            # First run — create the table
+            logger.info("Table %s not found, creating...", table)
+            df.writeTo(table).using("iceberg").partitionedBy("_year", "_month", "_day").create()
+        else:
+            raise
+    logger.info("Written rows to %s", table)
 
 
 def process(source: str, date: str):
@@ -179,8 +183,16 @@ def process(source: str, date: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--source", required=True, choices=list(SCHEMAS))
-    parser.add_argument("--date", default=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-    args = parser.parse_args()
+    # Read from env vars (set by Airflow via REST API environmentVariables)
+    # Falls back to argparse for direct spark-submit usage
+    if os.environ.get("ETL_SOURCE"):
+        class Args:
+            source = os.environ["ETL_SOURCE"]
+            date = os.environ.get("ETL_DATE", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        args = Args()
+    else:
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--source", required=True, choices=list(SCHEMAS))
+        parser.add_argument("--date", default=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        args = parser.parse_args()
     process(args.source, args.date)
