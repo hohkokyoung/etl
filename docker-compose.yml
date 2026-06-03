@@ -399,42 +399,6 @@ services:
           cpus: "0.5"
           memory: 512m
 
-  # ── Spark Streaming Consumer (Kafka → S3 silver Iceberg) ─────────
-  spark-streaming:
-    image: etl-spark:latest
-    container_name: etl-spark-streaming
-    user: root
-    depends_on:
-      kafka:
-        condition: service_healthy
-      floci:
-        condition: service_healthy
-      spark-master:
-        condition: service_healthy
-    env_file: .env
-    environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      AWS_ENDPOINT_URL: http://floci:4566
-      AWS_ACCESS_KEY_ID: test
-      AWS_SECRET_ACCESS_KEY: test
-      S3_BUCKET_SILVER: processed-silver
-      SPARK_MASTER: local[2]
-    volumes:
-      - ./ingestion/consumers/spark_streaming:/opt/streaming
-    command:
-      - /opt/spark/bin/spark-submit
-      - --master
-      - local[2]
-      - --jars
-      - /opt/spark-jars/iceberg-spark-runtime-3.5_2.12-1.6.0.jar,/opt/spark-jars/hadoop-aws-3.3.4.jar,/opt/spark-jars/aws-java-sdk-bundle-1.12.262.jar,/opt/spark-jars/spark-sql-kafka-0-10_2.12-3.5.3.jar,/opt/spark-jars/kafka-clients-3.4.1.jar,/opt/spark-jars/spark-token-provider-kafka-0-10_2.12-3.5.3.jar,/opt/spark-jars/commons-pool2-2.11.1.jar
-      - /opt/streaming/streaming_job.py
-    <<: *restart
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 3g
-
   # ── Python Kafka Consumer (bronze) ────────────────────────────────
   python-consumer:
     build:

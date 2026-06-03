@@ -26,6 +26,7 @@ S3_SILVER = os.environ.get("S3_BUCKET_SILVER", "processed-silver")
 S3_ENDPOINT = os.environ.get("AWS_ENDPOINT_URL", "http://localhost:4566")
 
 SCHEMAS: dict[str, StructType] = {
+    # order_created events only — customer/product events handled separately below
     "transactions": StructType([
         StructField("order_id", StringType()),
         StructField("customer_id", StringType()),
@@ -78,6 +79,27 @@ SCHEMAS: dict[str, StructType] = {
         StructField("event_ts", TimestampType()),
     ]),
 }
+
+# Schemas for dim events mixed into the transactions topic
+CUSTOMER_SCHEMA = StructType([
+    StructField("customer_id", StringType()),
+    StructField("email", StringType()),
+    StructField("name", StringType()),
+    StructField("region", StringType()),
+    StructField("age_group", StringType()),
+    StructField("created_at", TimestampType()),  # customers use created_at, not event_ts
+    StructField("event_type", StringType()),
+])
+
+PRODUCT_SCHEMA = StructType([
+    StructField("product_id", StringType()),
+    StructField("name", StringType()),
+    StructField("category", StringType()),
+    StructField("price", DecimalType(10, 2)),
+    StructField("stock_quantity", IntegerType()),
+    StructField("created_at", TimestampType()),  # products use created_at, not event_ts
+    StructField("event_type", StringType()),
+])
 
 # Primary key per source (for deduplication)
 DEDUP_KEYS: dict[str, str] = {
@@ -163,6 +185,47 @@ def write_silver(df: DataFrame, source: str, spark: SparkSession):
     logger.info("Written rows to %s", table)
 
 
+def process_dim_events(raw: DataFrame, batch_id: str, spark: SparkSession):
+    """
+    Extract customer_registered and product_created events from the transactions
+    bronze file and write to their own silver tables.
+    Customers/products use 'created_at' instead of 'event_ts'.
+    """
+    from pyspark.sql.window import Window
+
+    def _write_dim(df: DataFrame, key: str, table: str):
+        # Rename created_at → event_ts so add_metadata works uniformly
+        df = df.withColumnRenamed("created_at", "event_ts")
+        w = Window.partitionBy(key).orderBy(F.col("event_ts").desc())
+        deduped = (
+            df.withColumn("_rn", F.row_number().over(w))
+            .filter(F.col("_rn") == 1)
+            .drop("_rn")
+        )
+        final = add_metadata(deduped, batch_id)
+        silver_table = f"lake.default.{table}"
+        try:
+            final.writeTo(silver_table).using("iceberg").partitionedBy("_year", "_month", "_day").append()
+        except Exception as e:
+            if "TABLE_OR_VIEW_NOT_FOUND" in str(e) or "table" in str(e).lower():
+                final.writeTo(silver_table).using("iceberg").partitionedBy("_year", "_month", "_day").create()
+            else:
+                raise
+        logger.info("Written dim rows to %s", silver_table)
+
+    customers = cast_to_schema(
+        raw.filter(F.col("event_type") == "customer_registered"), CUSTOMER_SCHEMA
+    ).filter(F.col("customer_id").isNotNull())
+    if not customers.isEmpty():
+        _write_dim(customers, "customer_id", "silver_customers")
+
+    products = cast_to_schema(
+        raw.filter(F.col("event_type") == "product_created"), PRODUCT_SCHEMA
+    ).filter(F.col("product_id").isNotNull())
+    if not products.isEmpty():
+        _write_dim(products, "product_id", "silver_products")
+
+
 def process(source: str, date: str):
     if source not in SCHEMAS:
         raise ValueError(f"Unknown source: {source}. Valid: {list(SCHEMAS)}")
@@ -173,6 +236,13 @@ def process(source: str, date: str):
     batch_id = f"{source}_{date}_{datetime.now(timezone.utc).strftime('%H%M%S')}"
 
     raw = read_bronze(spark, source, date)
+
+    # Transactions bronze has three event types mixed together.
+    # Extract dim events (customers, products) first, then process orders.
+    if source == "transactions":
+        process_dim_events(raw, batch_id, spark)
+        raw = raw.filter(F.col("event_type") == "order_created")
+
     typed = cast_to_schema(raw, SCHEMAS[source])
     deduped = deduplicate(typed, DEDUP_KEYS[source])
     final = add_metadata(deduped, batch_id)
