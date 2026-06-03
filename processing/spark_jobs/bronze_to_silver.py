@@ -119,9 +119,9 @@ def build_spark() -> SparkSession:
         .master(master)
         .appName("etl-bronze-to-silver")
         .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
-        .config("spark.sql.catalog.lake", "org.apache.iceberg.spark.SparkCatalog")
-        .config("spark.sql.catalog.lake.type", "hadoop")
-        .config("spark.sql.catalog.lake.warehouse", f"s3a://{S3_SILVER}")
+        .config("spark.sql.catalog.silver", "org.apache.iceberg.spark.SparkCatalog")
+        .config("spark.sql.catalog.silver.type", "hadoop")
+        .config("spark.sql.catalog.silver.warehouse", f"s3a://{S3_SILVER}")
         .config("spark.hadoop.fs.s3a.endpoint", S3_ENDPOINT)
         .config("spark.hadoop.fs.s3a.access.key", os.environ.get("AWS_ACCESS_KEY_ID", "test"))
         .config("spark.hadoop.fs.s3a.secret.key", os.environ.get("AWS_SECRET_ACCESS_KEY", "test"))
@@ -171,7 +171,7 @@ def add_metadata(df: DataFrame, batch_id: str) -> DataFrame:
 
 
 def write_silver(df: DataFrame, source: str, spark: SparkSession):
-    table = f"lake.default.silver_{source}"
+    table = f"silver.default.silver_{source}"
     try:
         # Append if table already exists
         df.writeTo(table).using("iceberg").partitionedBy("_year", "_month", "_day").append()
@@ -203,7 +203,7 @@ def process_dim_events(raw: DataFrame, batch_id: str, spark: SparkSession):
             .drop("_rn")
         )
         final = add_metadata(deduped, batch_id)
-        silver_table = f"lake.default.{table}"
+        silver_table = f"silver.default.{table}"
         try:
             final.writeTo(silver_table).using("iceberg").partitionedBy("_year", "_month", "_day").append()
         except Exception as e:
